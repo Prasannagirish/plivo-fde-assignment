@@ -21,7 +21,7 @@ State is carried in the URL (`?lang=`), so there is no database or session store
 
 ## Setup
 
-Requires Python 3.9+ and a way to expose localhost over HTTPS (ngrok or cloudflared).
+Requires Python 3 and a way to expose localhost over HTTPS (ngrok or cloudflared).
 
 ```bash
 python3 -m venv .venv

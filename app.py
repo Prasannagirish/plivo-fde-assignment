@@ -34,7 +34,7 @@ def set_status(state, detail=""):
 
 # Routes Plivo calls back into; everything else (UI, /call, /status) is ours.
 PLIVO_PATHS = {"/answer", "/otp", "/language", "/language/choice", "/menu", "/menu/choice",
-               "/dial-done", "/ringing", "/hangup"}
+               "/dial-done", "/hangup"}
 
 
 @app.before_request
@@ -113,8 +113,6 @@ def call():
             to_=target,
             answer_url=url("/answer"),
             answer_method="POST",
-            ring_url=url("/ringing"),
-            ring_method="POST",
             hangup_url=url("/hangup"),
             hangup_method="POST",
         )
@@ -128,12 +126,6 @@ def call():
 @app.get("/status")
 def status():
     return jsonify(call_status)
-
-
-@app.post("/ringing")
-def ringing():
-    set_status("ringing", "Phone is ringing")
-    return ("", 204)
 
 
 @app.post("/hangup")
