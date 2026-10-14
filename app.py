@@ -4,8 +4,9 @@ from urllib.parse import urlencode
 
 import plivo
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, abort, jsonify, render_template, request
 from plivo import plivoxml
+from plivo.utils import validate_v3_signature
 
 load_dotenv()
 
@@ -18,8 +19,37 @@ PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 OTP = os.environ.get("OTP", "1110")  # birthdate, DDMM (11 October)
 AUDIO_URL = os.environ.get("AUDIO_URL", "https://s3.amazonaws.com/plivocloud/Trumpet.mp3")
 
+SKIP_SIGNATURE_CHECK = os.environ.get("SKIP_SIGNATURE_CHECK") == "1"  # local curl testing only
+
 app = Flask(__name__)
 client = plivo.RestClient(AUTH_ID, AUTH_TOKEN)
+
+# Latest call's progress, shown in the UI. In-memory is enough for a single-call demo.
+call_status = {"state": "idle", "detail": ""}
+
+
+def set_status(state, detail=""):
+    call_status.update(state=state, detail=detail)
+
+
+# Routes Plivo calls back into; everything else (UI, /call, /status) is ours.
+PLIVO_PATHS = {"/answer", "/otp", "/language", "/language/choice", "/menu", "/menu/choice",
+               "/dial-done", "/ringing", "/hangup"}
+
+
+@app.before_request
+def verify_plivo_signature():
+    """Reject IVR requests that did not come from Plivo (X-Plivo-Signature-V3)."""
+    if request.path not in PLIVO_PATHS or SKIP_SIGNATURE_CHECK:
+        return
+    uri = f"{base_url()}{request.path}"
+    if request.query_string:
+        uri += f"?{request.query_string.decode()}"
+    sig = request.headers.get("X-Plivo-Signature-V3", "")
+    nonce = request.headers.get("X-Plivo-Signature-V3-Nonce", "")
+    params = request.form.to_dict() if request.method == "POST" else None
+    if not (sig and nonce and validate_v3_signature(request.method, uri, nonce, AUTH_TOKEN, sig, params)):
+        abort(403)
 
 # Prompt text + TTS locale per language.
 LANGS = {
@@ -83,10 +113,34 @@ def call():
             to_=target,
             answer_url=url("/answer"),
             answer_method="POST",
+            ring_url=url("/ringing"),
+            ring_method="POST",
+            hangup_url=url("/hangup"),
+            hangup_method="POST",
         )
-    except Exception as e:  # surface Plivo errors (e.g. unverified trial number) in the UI
+    except Exception as e:  # surface Plivo errors in the UI
+        set_status("failed", str(e))
         return jsonify(error=str(e)), 502
+    set_status("queued", "Call queued with Plivo")
     return jsonify(message=r.message, request_uuid=r.request_uuid)
+
+
+@app.get("/status")
+def status():
+    return jsonify(call_status)
+
+
+@app.post("/ringing")
+def ringing():
+    set_status("ringing", "Phone is ringing")
+    return ("", 204)
+
+
+@app.post("/hangup")
+def hangup():
+    reason = request.values.get("HangupCauseName") or request.values.get("CallStatus") or "ended"
+    set_status("ended", f"Call ended ({reason})")
+    return ("", 204)
 
 
 # ---------- IVR: Level 0 - OTP ----------
@@ -94,6 +148,7 @@ def call():
 @app.route("/answer", methods=["GET", "POST"])
 def answer():
     """Prompt for the 4-digit OTP. Falls through to a redirect (re-prompt) on timeout."""
+    set_status("otp", "Answered - waiting for OTP")
     resp = plivoxml.ResponseElement()
     gd = plivoxml.GetDigitsElement(action=url("/otp"), method="POST", num_digits=4, timeout=10)
     speak(gd, "Welcome to InspireWorks. Please enter your 4 digit one time password.")
@@ -107,9 +162,11 @@ def answer():
 def otp():
     resp = plivoxml.ResponseElement()
     if digits() == OTP:
+        set_status("language", "OTP correct - language menu")
         speak(resp, "Thank you. You have been authenticated.")
         resp.add_redirect(url("/language"), method="POST")
     else:
+        set_status("otp", "Wrong OTP entered - re-prompting")
         speak(resp, "That password is incorrect. Please try again.")
         resp.add_redirect(url("/answer"), method="POST")
     return xml(resp)
@@ -133,6 +190,7 @@ def language_choice():
     resp = plivoxml.ResponseElement()
     lang = {"1": "en", "2": "es"}.get(digits())
     if lang:
+        set_status("menu", f"Language: {'English' if lang == 'en' else 'Spanish'} - action menu")
         resp.add_redirect(url("/menu", lang=lang), method="POST")
     else:
         speak(resp, "Sorry, that was not a valid option. Lo sentimos, esa opción no es válida.")
@@ -160,11 +218,13 @@ def menu_choice():
     resp = plivoxml.ResponseElement()
     d = digits()
     if d == "1":
+        set_status("audio", "Playing audio message")
         speak(resp, t["audio_intro"], lang)
         resp.add_play(AUDIO_URL)
         speak(resp, t["bye"], lang)
         resp.add_hangup()
     elif d == "2":
+        set_status("transfer", "Forwarding to live associate")
         speak(resp, t["connecting"], lang)
         dial = plivoxml.DialElement(caller_id=PLIVO_NUMBER, timeout=30, action=url("/dial-done", lang=lang), method="POST")
         dial.add_number(ASSOCIATE_NUMBER)

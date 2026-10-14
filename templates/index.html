@@ -15,6 +15,8 @@
   button:disabled { opacity: .6; cursor: wait; }
   #status { margin-top: 16px; font-size: 14px; min-height: 20px; }
   .ok { color: #0a7c3a; } .err { color: #b42318; }
+  #live { margin-top: 12px; font-size: 14px; color: #444; }
+  #live b { text-transform: capitalize; }
 </style>
 </head>
 <body>
@@ -25,6 +27,7 @@
   <input id="to" type="tel" value="{{ default_target }}">
   <button id="go">Call me</button>
   <div id="status"></div>
+  <div id="live"></div>
 </div>
 <script>
 const btn = document.getElementById('go'), st = document.getElementById('status');
@@ -39,6 +42,12 @@ btn.onclick = async () => {
   } catch (e) { st.className = 'err'; st.textContent = e.message; }
   btn.disabled = false;
 };
+setInterval(async () => {
+  try {
+    const j = await (await fetch('/status')).json();
+    document.getElementById('live').innerHTML = j.state === 'idle' ? '' : 'Call status: <b>' + j.state + '</b> — ' + j.detail;
+  } catch (e) {}
+}, 1000);
 </script>
 </body>
 </html>
