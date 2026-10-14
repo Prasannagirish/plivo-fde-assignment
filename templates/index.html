@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InspireWorks IVR Demo</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background: #f5f6f8; margin: 0; display: grid; place-items: center; min-height: 100vh; }
+  .card { background: #fff; border-radius: 12px; padding: 32px; width: min(420px, 92vw); box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: #666; margin: 0 0 24px; font-size: 14px; }
+  label { font-size: 13px; color: #444; display: block; margin-bottom: 6px; }
+  input { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 16px; border: 1px solid #ccd; border-radius: 8px; }
+  button { margin-top: 16px; width: 100%; padding: 12px; font-size: 16px; border: 0; border-radius: 8px; background: #1a56db; color: #fff; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: wait; }
+  #status { margin-top: 16px; font-size: 14px; min-height: 20px; }
+  .ok { color: #0a7c3a; } .err { color: #b42318; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>InspireWorks IVR Demo</h1>
+  <p class="sub">Outbound call from {{ from_number }}</p>
+  <label for="to">Phone number to call (E.164)</label>
+  <input id="to" type="tel" value="{{ default_target }}">
+  <button id="go">Call me</button>
+  <div id="status"></div>
+</div>
+<script>
+const btn = document.getElementById('go'), st = document.getElementById('status');
+btn.onclick = async () => {
+  btn.disabled = true; st.className = ''; st.textContent = 'Placing call…';
+  try {
+    const r = await fetch('/call', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({to: document.getElementById('to').value})});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    st.className = 'ok'; st.textContent = 'Call queued — answer your phone. (' + j.request_uuid + ')';
+  } catch (e) { st.className = 'err'; st.textContent = e.message; }
+  btn.disabled = false;
+};
+</script>
+</body>
+</html>
